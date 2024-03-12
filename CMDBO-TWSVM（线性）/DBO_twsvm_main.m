@@ -1,0 +1,169 @@
+% 支持向量机Matlab工具箱C-SVC, 孪生线性核函数二类分类算法
+% 使用平台 - Matlab7.12
+
+
+close all
+clear
+clc
+num = 1 ;%运行次数
+arr=zeros(num,1); %运行num次保存的正确率结果
+load N_p   % 正类点数据，特征信息存放在列里面
+load N_n   % 负类点数据，特征信息存放在列里面
+
+for i=1:num
+    %% 第一步：数据预处理
+    % 由原来的数据产生80%的训练数据和20%的预测数据
+    n_p=size(N_p,2);       % 返回矩阵的列数
+    n_n=size(N_n,2);       % 返回矩阵的列数
+    n1=randperm(n_p);      % 对1到n的n个正整数进行随机不重复的排列，形成一个1行n列的矩阵
+    n1=n1';
+    n2=randperm(n_n);
+    n2=n2';
+    f_p=floor(4*n_p/5);    % 取80%的数据作为训练集，其余20%作为预测集
+    f_n=floor(4*n_n/5); 
+    data_train_p=N_p(:,n1(1:f_p));                  % 正类训练数据
+    data_train_n=N_n(:,n2(1:f_n));                  % 负类训练数据
+    data_train=[data_train_p,data_train_n];         % 训练数据集（含正负类）
+    Y_train=[ones(1,f_p),-ones(1,f_n)];             % 训练数据标签集 
+    
+    data_predict_p=N_p(:,n1(f_p+1:end));            % 正类预测数据
+    data_predict_n=N_n(:,n2(f_n+1:end));            % 负类预测数据
+    data_predict=[data_predict_p,data_predict_n];   % 预测数据集（含正负类）
+    Y_predict=[ones(1,n_p-f_p),-ones(1,n_n-f_n)];   % 预测数据标签集 
+    
+    % 相关参数初始化
+    bestAccuracy=0;
+    k=0;
+    c1min=-2;
+    c1max=2;
+    c2min=-2;
+    c2max=2;
+    best_c1=0;best_c2=0;
+    data_train=data_train';
+    Y_train=Y_train';
+    SearchAgents_no=30; % Number of search agents
+    
+    Function_name='pima'; % Name of the test function that can be from F1 to F23 (Table 1,2,3 in the paper)
+    
+    Max_iteration=50; % Maximum numbef of iterations
+    
+    % Load details of the selected benchmark function
+    % %% 第二步：通过蜣螂优化算法训练寻找最优参数c1,c2
+    [lb,ub,dim,fobj]=Get_Functions_details(Function_name);
+    t1 = clock
+    [fMin,bestX_PSO,PSO_curve]=PSO(data_train,Y_train,SearchAgents_no,Max_iteration,lb,ub,dim,fobj);
+    t2 = clock
+    disp(['PSO_curve运行时间: ',num2str(etime(t1,t2))]);
+    time_PSO = num2str(etime(t2,t1))
+    t1 = clock
+    [fMin,bestX_DBO,DBO_curve]=DBO(data_train,Y_train,SearchAgents_no,Max_iteration,lb,ub,dim,fobj);
+    t2 = clock
+    disp(['DBO_curve运行时间: ',num2str(etime(t1,t2))]);
+    time_DBO = num2str(etime(t2,t1))
+    t1 = clock
+    [fMin,bestX_CMDBO,CMDBO_curve]=CMDBO(data_train,Y_train,SearchAgents_no,Max_iteration,lb,ub,dim,fobj);
+    t2 = clock
+    disp(['CMDBO_curve运行时间: ',num2str(etime(t1,t2))]);
+    time_CMDBO = num2str(etime(t2,t1))
+    figure(1)
+    semilogy(PSO_curve,'Color','g');
+    title('Parkinson linear experiment convergence curve');
+    xlabel('Iteration');
+    ylabel('Classification accuracy');
+    axis tight
+    grid on
+    box on
+    hold on
+    semilogy(DBO_curve,'Color','r');
+    hold on
+    semilogy(CMDBO_curve,'Color','b');
+   
+     legend('PSO-curve','DBO-TWSVM','CMDBO-curve')
+    hold off
+
+    display(['The best solution obtained by DBO is : ', num2str(CMDBO_curve)]);
+    display(['The best optimal value of the objective funciton found by DBO is : ', num2str(fMin)]);
+    
+    
+    best_c1 = CMDBO_curve(1);
+    best_c2 = CMDBO_curve(2);
+    
+    
+    
+    %% 第三步：通过最优参数，对80%的数据训练，产生分类面，利用20%的预测数据进行准确率计算
+    k=0;
+    c1=best_c1;
+    c2=best_c2;
+    data_train_p=data_train_p';                  % 训练数据信息全在列里面了
+    data_train_n=data_train_n';                  % 训练数据信息全在列里面了
+    data_predict=data_predict';                  % 预测数据信息全在列里面了
+    tic;
+    [v1,v2,IB,JA]=twinsvm_lin_train(data_train_p,data_train_n,c1,c2); 
+    n=size(data_predict,1);
+    result=rand(n,1);
+    test_data1=[data_predict,ones(n,1)];
+    distance1=abs(test_data1*v1);           % 靠近正类点所在平面的预测结果
+    distance2=abs(test_data1*v2);           % 靠近负类点所在平面的预测结果
+    test_distance=min(distance1,distance2);
+    for run1=1:n
+       if test_distance(run1)==distance1(run1)
+          result(run1)=1;                     % 将预测结果转化为标记为1与-1的预测结果
+       else
+          result(run1)=-1;                    % 将预测结果转化为标记为1与-1的预测结果
+       end
+    end
+    for run1=1:n
+      if Y_predict(run1)==result(run1)        % 预测准确度计算
+          k=k+1;
+      end
+    end
+arr(i)=k/n;
+end
+arr_int = sum(arr)/num;
+t_predict=toc
+disp('预测准确率结果');
+str = sprintf( 'Accuracy =%g%% ',arr_int*100);
+best_c1
+best_c2
+time_PSO
+time_DBO
+time_CMDBO
+disp(str);
+
+
+%% 第四步：绘图
+tic;
+% 绘制训练点
+figure(3);
+plot(data_train_p(:,1),data_train_p(:,2),'c+',data_train_n(:,1),data_train_n(:,2),'mx'); 
+title('线性孪生支持向量机')
+hold on
+grid on
+% 绘制预测点
+plot(data_predict_p(1,:),data_predict_p(2,:),'g>',data_predict_n(1,:),data_predict_n(2,:),'r<');
+% 绘制支持向量
+plot(data_train_n(IB,1),data_train_n(IB,2),'ko',data_train_p(JA,1),data_train_p(JA,2),'ko');
+
+% %标示出错分的点
+% row=2*size(N_p,2)/5;
+% Y_predict = Y_predict';
+% for run=1:row
+%     if Y_predict(run)~=result(run)
+%         plot(test_data1(run,1),test_data1(run,2),'ko')
+%         hold on
+%     end
+% end
+%绘制分类面的图像
+
+plotpc(v1(1:2,:)',v1(3))
+plotpc(v2(1:2,:)',v2(3))
+legend('正类训练点','负类训练点','正类预测点','负类预测点','支持向量');
+t_picture=toc
+hold off
+
+
+
+            
+            
+            
+            
